@@ -41,11 +41,22 @@ local function selectComp(title, cType)
     return list[idx]
 end
 
-local function setupWizard()
-    term.clear()
-    print("=== SETUP RELAY v17 ===")
+local function renderSides(tp)
+    print("\nСтороны транспозера с инвентарём:")
+    for i = 0, 5 do
+        if tp.getInventorySize(i) then
+            print("  ["..i.."] OK")
+        else
+            print("  ["..i.."] --")
+        end
+    end
+end
 
-    local cfg = {}
+local function configureNetwork(title, current)
+    term.clear()
+    print("=== НАСТРОЙКА: " .. title .. " ===")
+
+    local cfg = current or {}
     cfg.me = selectComp("ME Interface", "me_interface")
     cfg.db = selectComp("Database", "database")
     cfg.tp = selectComp("Transposer", "transposer")
@@ -56,30 +67,81 @@ local function setupWizard()
     end
 
     local tp = component.proxy(cfg.tp)
+    renderSides(tp)
 
-    print("\nСтороны транспозера с инвентарём:")
-    for i = 0, 5 do
-        if tp.getInventorySize(i) then
-            print("  ["..i.."] OK")
+    io.write("\nСторона МЭ-интерфейса: ")
+    cfg.me_side = tonumber(io.read())
+
+    io.write("Сторона буфера (общий сундук/шина): ")
+    cfg.buffer_side = tonumber(io.read())
+
+    return cfg
+end
+
+local function printNetworkSummary(title, cfg)
+    if not cfg then
+        print(title .. ": не настроено")
+        return
+    end
+    print(title .. ":")
+    print("  ME: " .. tostring(cfg.me or "-"))
+    print("  DB: " .. tostring(cfg.db or "-"))
+    print("  TP: " .. tostring(cfg.tp or "-"))
+    print("  ME side: " .. tostring(cfg.me_side or "-"))
+    print("  Buffer side: " .. tostring(cfg.buffer_side or "-"))
+end
+
+local function setupWizard(existing)
+    local cfg = existing or {}
+    while true do
+        term.clear()
+        print("=== CONFIG RELAY v17 ===")
+        printNetworkSummary("Основная сеть", cfg.main)
+        printNetworkSummary("Вторичная сеть", cfg.secondary)
+
+        print("\n[1] Настроить основную сеть")
+        print("[2] Настроить вторичную сеть")
+        print("[3] Сохранить и выйти")
+        print("[4] Выйти без сохранения")
+        io.write("Выбор: ")
+        local choice = tonumber(io.read())
+
+        if choice == 1 then
+            cfg.main = configureNetwork("ОСНОВНАЯ СЕТЬ", cfg.main)
+            os.sleep(0.5)
+        elseif choice == 2 then
+            cfg.secondary = configureNetwork("ВТОРИЧНАЯ СЕТЬ", cfg.secondary)
+            os.sleep(0.5)
+        elseif choice == 3 then
+            if not (cfg.main and cfg.main.me and cfg.main.db and cfg.main.tp and cfg.main.me_side and cfg.main.buffer_side) then
+                print("Основная сеть не полностью настроена")
+                os.sleep(1.5)
+            elseif not (cfg.secondary and cfg.secondary.me and cfg.secondary.db and cfg.secondary.tp and cfg.secondary.me_side and cfg.secondary.buffer_side) then
+                print("Вторичная сеть не полностью настроена")
+                os.sleep(1.5)
+            else
+                saveConfig(cfg)
+                print("Сохранено.")
+                os.sleep(1)
+                return cfg
+            end
+        elseif choice == 4 then
+            return nil
         end
     end
-
-    io.write("\nСторона МЭ-источника (основная сеть): ")
-    cfg.s1 = tonumber(io.read())
-
-    io.write("Сторона приёмника (вторичная сеть): ")
-    cfg.s2 = tonumber(io.read())
-
-    saveConfig(cfg)
-    print("Сохранено.")
-    os.sleep(1)
-    return cfg
 end
 
 local function normalizeConfig(cfg)
     if not cfg then return nil end
-    if cfg.main_side and not cfg.s1 then cfg.s1 = cfg.main_side end
-    if cfg.secondary_side and not cfg.s2 then cfg.s2 = cfg.secondary_side end
+    if cfg.s1 and cfg.s2 and not cfg.main then
+        cfg.main = {
+            me = cfg.me,
+            db = cfg.db,
+            tp = cfg.tp,
+            me_side = cfg.s1,
+            buffer_side = cfg.s2
+        }
+    end
     return cfg
 end
 
@@ -170,19 +232,31 @@ end
 -- ОСНОВНОЙ ЦИКЛ
 -- =========================================================
 
-local cfg = normalizeConfig(loadConfig()) or setupWizard()
+local cfg = normalizeConfig(loadConfig())
+if not (cfg and cfg.main and cfg.secondary) then
+    cfg = setupWizard(cfg)
+end
 if not cfg then return end
 
-local me = component.proxy(cfg.me)
-local db = component.proxy(cfg.db)
-local tp = component.proxy(cfg.tp)
+local me = component.proxy(cfg.main.me)
+local db = component.proxy(cfg.main.db)
+local tp = component.proxy(cfg.main.tp)
 
 local function transferForward()
+    local main = cfg.main
+    local secondary = cfg.secondary
+    if not (main and secondary) then return end
+
+    local meMain = component.proxy(main.me)
+    local dbMain = component.proxy(main.db)
+    local tpMain = component.proxy(main.tp)
+    local tpSecondary = component.proxy(secondary.tp)
+
     io.write("\nПоиск (back): ")
     local search = io.read()
     if search == "back" then return end
 
-    local items = me.getItemsInNetwork()
+    local items = meMain.getItemsInNetwork()
     if type(items) ~= "table" then
         print("Ошибка сети МЭ")
         os.sleep(2)
@@ -217,18 +291,29 @@ local function transferForward()
     local total = tonumber(io.read()) or 0
     if total <= 0 then return end
 
-    if not syncDatabase(me, db, filter) then
+    if not syncDatabase(meMain, dbMain, filter) then
         print("Ошибка базы. Enter.")
         io.read()
         return
     end
 
     print("Открываю интерфейс...")
-    me.setInterfaceConfiguration(1, db.address, 1, 64)
+    meMain.setInterfaceConfiguration(1, dbMain.address, 1, 64)
 
     local moved = 0
     while moved < total do
-        local res = tp.transferItem(cfg.s1, cfg.s2, math.min(64, total - moved), 1)
+        local res = tpMain.transferItem(main.me_side, main.buffer_side, math.min(64, total - moved), 1)
+        if res and res > 0 then
+            moved = moved + res
+            print("Прогресс: "..moved.."/"..total)
+        else
+            os.sleep(0.3)
+        end
+    end
+
+    moved = 0
+    while moved < total do
+        local res = tpSecondary.transferItem(secondary.buffer_side, secondary.me_side, math.min(64, total - moved))
         if res and res > 0 then
             moved = moved + res
             print("Прогресс: "..moved.."/"..total)
@@ -239,31 +324,77 @@ local function transferForward()
 end
 
 local function transferBackward()
-    local list = collectSideItems(tp, cfg.s2)
-    if #list == 0 then
-        print("Во вторичной сети пусто")
+    local main = cfg.main
+    local secondary = cfg.secondary
+    if not (main and secondary) then return end
+
+    local meSecondary = component.proxy(secondary.me)
+    local dbSecondary = component.proxy(secondary.db)
+    local tpSecondary = component.proxy(secondary.tp)
+    local tpMain = component.proxy(main.tp)
+
+    io.write("\nПоиск (back): ")
+    local search = io.read()
+    if search == "back" then return end
+
+    local items = meSecondary.getItemsInNetwork()
+    if type(items) ~= "table" then
+        print("Ошибка сети МЭ")
+        os.sleep(2)
+        return
+    end
+
+    local matches = {}
+    for _, it in ipairs(items) do
+        if it.label and it.label:lower():find(search:lower()) then
+            table.insert(matches, it)
+        end
+    end
+
+    if #matches == 0 then
+        print("Не найдено")
         os.sleep(1.5)
         return
     end
 
-    print("\nДоступные предметы во вторичной сети:")
-    for i, it in ipairs(list) do
+    for i, it in ipairs(matches) do
         print(string.format("[%d] %s (%d)", i, it.label, it.size))
     end
 
-    io.write("Выбор (back): ")
-    local sel = io.read()
-    if sel == "back" then return end
-    sel = tonumber(sel)
-    if not sel or not list[sel] then return end
+    io.write("Выбор: ")
+    local sel = tonumber(io.read())
+    if not sel or not matches[sel] then return end
+
+    local c = matches[sel]
+    local filter = {name=c.name, damage=c.damage, nbt_hash=c.nbt_hash}
 
     io.write("Количество: ")
     local total = tonumber(io.read()) or 0
     if total <= 0 then return end
 
+    if not syncDatabase(meSecondary, dbSecondary, filter) then
+        print("Ошибка базы. Enter.")
+        io.read()
+        return
+    end
+
+    print("Открываю интерфейс...")
+    meSecondary.setInterfaceConfiguration(1, dbSecondary.address, 1, 64)
+
     local moved = 0
     while moved < total do
-        local res = tp.transferItem(cfg.s2, cfg.s1, math.min(64, total - moved))
+        local res = tpSecondary.transferItem(secondary.me_side, secondary.buffer_side, math.min(64, total - moved), 1)
+        if res and res > 0 then
+            moved = moved + res
+            print("Прогресс: "..moved.."/"..total)
+        else
+            os.sleep(0.3)
+        end
+    end
+
+    moved = 0
+    while moved < total do
+        local res = tpMain.transferItem(main.buffer_side, main.me_side, math.min(64, total - moved))
         if res and res > 0 then
             moved = moved + res
             print("Прогресс: "..moved.."/"..total)
@@ -278,14 +409,14 @@ while true do
     if action == 4 then break end
 
     if action == 3 then
-        cfg = setupWizard()
+        cfg = setupWizard(cfg)
         if not cfg then
             cfg = normalizeConfig(loadConfig())
         end
         if cfg then
-            me = component.proxy(cfg.me)
-            db = component.proxy(cfg.db)
-            tp = component.proxy(cfg.tp)
+            me = component.proxy(cfg.main.me)
+            db = component.proxy(cfg.main.db)
+            tp = component.proxy(cfg.main.tp)
         end
     elseif action == 2 then
         transferBackward()
