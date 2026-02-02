@@ -40,7 +40,6 @@ local function withRetry(label, fn)
         os.sleep(COOLDOWN_DELAY)
     end
     LAST_COOLDOWN = true
-    print("Ошибка: " .. label .. " (cooldown)")
     return nil
 end
 
@@ -471,8 +470,9 @@ local function transferForward()
     local search = io.read()
     if search == "back" then return end
 
+    LAST_COOLDOWN = false
     local items = withRetry("getItemsInNetwork", function() return meMain.getItemsInNetwork() end)
-    if type(items) ~= "table" then
+    if not items or type(items) ~= "table" then
         if LAST_COOLDOWN then
             print("Сеть МЭ в cooldown. Повторите попытку.")
         else
@@ -542,8 +542,9 @@ local function transferBackward()
     local search = io.read()
     if search == "back" then return end
 
+    LAST_COOLDOWN = false
     local items = withRetry("getItemsInNetwork", function() return meSecondary.getItemsInNetwork() end)
-    if type(items) ~= "table" then
+    if not items or type(items) ~= "table" then
         if LAST_COOLDOWN then
             print("Сеть МЭ в cooldown. Повторите попытку.")
         else
