@@ -52,28 +52,24 @@ local function renderSides(tp)
     end
 end
 
-local function configureNetwork(title, current)
+local function configureNetwork(title, current, sharedTp)
     term.clear()
     print("=== НАСТРОЙКА: " .. title .. " ===")
 
     local cfg = current or {}
     cfg.me = selectComp("ME Interface", "me_interface")
     cfg.db = selectComp("Database", "database")
-    cfg.tp = selectComp("Transposer", "transposer")
 
-    if not cfg.me or not cfg.db or not cfg.tp then
+    if not cfg.me or not cfg.db then
         print("Ошибка выбора компонентов")
         return nil
     end
 
-    local tp = component.proxy(cfg.tp)
+    local tp = component.proxy(sharedTp)
     renderSides(tp)
 
     io.write("\nСторона МЭ-интерфейса: ")
     cfg.me_side = tonumber(io.read())
-
-    io.write("Сторона буфера (общий сундук/шина): ")
-    cfg.buffer_side = tonumber(io.read())
 
     return cfg
 end
@@ -86,9 +82,7 @@ local function printNetworkSummary(title, cfg)
     print(title .. ":")
     print("  ME: " .. tostring(cfg.me or "-"))
     print("  DB: " .. tostring(cfg.db or "-"))
-    print("  TP: " .. tostring(cfg.tp or "-"))
     print("  ME side: " .. tostring(cfg.me_side or "-"))
-    print("  Buffer side: " .. tostring(cfg.buffer_side or "-"))
 end
 
 local function setupWizard(existing)
@@ -96,9 +90,11 @@ local function setupWizard(existing)
     while true do
         term.clear()
         print("=== CONFIG RELAY v17 ===")
+        print("Транспозер (общий): " .. tostring(cfg.tp or "-"))
         printNetworkSummary("Основная сеть", cfg.main)
         printNetworkSummary("Вторичная сеть", cfg.secondary)
 
+        print("\n[0] Выбрать общий транспозер")
         print("\n[1] Настроить основную сеть")
         print("[2] Настроить вторичную сеть")
         print("[3] Сохранить и выйти")
@@ -106,17 +102,33 @@ local function setupWizard(existing)
         io.write("Выбор: ")
         local choice = tonumber(io.read())
 
-        if choice == 1 then
-            cfg.main = configureNetwork("ОСНОВНАЯ СЕТЬ", cfg.main)
+        if choice == 0 then
+            cfg.tp = selectComp("Transposer (общий)", "transposer")
             os.sleep(0.5)
+        elseif choice == 1 then
+            if not cfg.tp then
+                print("Сначала выберите общий транспозер")
+                os.sleep(1.5)
+            else
+                cfg.main = configureNetwork("ОСНОВНАЯ СЕТЬ", cfg.main, cfg.tp)
+                os.sleep(0.5)
+            end
         elseif choice == 2 then
-            cfg.secondary = configureNetwork("ВТОРИЧНАЯ СЕТЬ", cfg.secondary)
-            os.sleep(0.5)
+            if not cfg.tp then
+                print("Сначала выберите общий транспозер")
+                os.sleep(1.5)
+            else
+                cfg.secondary = configureNetwork("ВТОРИЧНАЯ СЕТЬ", cfg.secondary, cfg.tp)
+                os.sleep(0.5)
+            end
         elseif choice == 3 then
-            if not (cfg.main and cfg.main.me and cfg.main.db and cfg.main.tp and cfg.main.me_side and cfg.main.buffer_side) then
+            if not cfg.tp then
+                print("Транспозер не выбран")
+                os.sleep(1.5)
+            elseif not (cfg.main and cfg.main.me and cfg.main.db and cfg.main.me_side) then
                 print("Основная сеть не полностью настроена")
                 os.sleep(1.5)
-            elseif not (cfg.secondary and cfg.secondary.me and cfg.secondary.db and cfg.secondary.tp and cfg.secondary.me_side and cfg.secondary.buffer_side) then
+            elseif not (cfg.secondary and cfg.secondary.me and cfg.secondary.db and cfg.secondary.me_side) then
                 print("Вторичная сеть не полностью настроена")
                 os.sleep(1.5)
             else
@@ -134,13 +146,20 @@ end
 local function normalizeConfig(cfg)
     if not cfg then return nil end
     if cfg.s1 and cfg.s2 and not cfg.main then
+        cfg.tp = cfg.tp or cfg.tp_main or cfg.tp_shared
         cfg.main = {
             me = cfg.me,
             db = cfg.db,
-            tp = cfg.tp,
-            me_side = cfg.s1,
-            buffer_side = cfg.s2
+            me_side = cfg.s1
         }
+        cfg.secondary = cfg.secondary or {
+            me = cfg.me_secondary,
+            db = cfg.db_secondary,
+            me_side = cfg.s2
+        }
+    end
+    if cfg.main and cfg.secondary and cfg.main.tp then
+        cfg.tp = cfg.tp or cfg.main.tp
     end
     return cfg
 end
@@ -240,17 +259,16 @@ if not cfg then return end
 
 local me = component.proxy(cfg.main.me)
 local db = component.proxy(cfg.main.db)
-local tp = component.proxy(cfg.main.tp)
+local tp = component.proxy(cfg.tp)
 
 local function transferForward()
     local main = cfg.main
     local secondary = cfg.secondary
-    if not (main and secondary) then return end
+    if not (main and secondary and cfg.tp) then return end
 
     local meMain = component.proxy(main.me)
     local dbMain = component.proxy(main.db)
-    local tpMain = component.proxy(main.tp)
-    local tpSecondary = component.proxy(secondary.tp)
+    local tpShared = component.proxy(cfg.tp)
 
     io.write("\nПоиск (back): ")
     local search = io.read()
@@ -302,18 +320,7 @@ local function transferForward()
 
     local moved = 0
     while moved < total do
-        local res = tpMain.transferItem(main.me_side, main.buffer_side, math.min(64, total - moved), 1)
-        if res and res > 0 then
-            moved = moved + res
-            print("Прогресс: "..moved.."/"..total)
-        else
-            os.sleep(0.3)
-        end
-    end
-
-    moved = 0
-    while moved < total do
-        local res = tpSecondary.transferItem(secondary.buffer_side, secondary.me_side, math.min(64, total - moved))
+        local res = tpShared.transferItem(main.me_side, secondary.me_side, math.min(64, total - moved), 1)
         if res and res > 0 then
             moved = moved + res
             print("Прогресс: "..moved.."/"..total)
@@ -326,12 +333,11 @@ end
 local function transferBackward()
     local main = cfg.main
     local secondary = cfg.secondary
-    if not (main and secondary) then return end
+    if not (main and secondary and cfg.tp) then return end
 
     local meSecondary = component.proxy(secondary.me)
     local dbSecondary = component.proxy(secondary.db)
-    local tpSecondary = component.proxy(secondary.tp)
-    local tpMain = component.proxy(main.tp)
+    local tpShared = component.proxy(cfg.tp)
 
     io.write("\nПоиск (back): ")
     local search = io.read()
@@ -383,18 +389,7 @@ local function transferBackward()
 
     local moved = 0
     while moved < total do
-        local res = tpSecondary.transferItem(secondary.me_side, secondary.buffer_side, math.min(64, total - moved), 1)
-        if res and res > 0 then
-            moved = moved + res
-            print("Прогресс: "..moved.."/"..total)
-        else
-            os.sleep(0.3)
-        end
-    end
-
-    moved = 0
-    while moved < total do
-        local res = tpMain.transferItem(main.buffer_side, main.me_side, math.min(64, total - moved))
+        local res = tpShared.transferItem(secondary.me_side, main.me_side, math.min(64, total - moved), 1)
         if res and res > 0 then
             moved = moved + res
             print("Прогресс: "..moved.."/"..total)
@@ -416,7 +411,7 @@ while true do
         if cfg then
             me = component.proxy(cfg.main.me)
             db = component.proxy(cfg.main.db)
-            tp = component.proxy(cfg.main.tp)
+            tp = component.proxy(cfg.tp)
         end
     elseif action == 2 then
         transferBackward()
