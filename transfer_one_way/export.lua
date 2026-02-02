@@ -278,17 +278,17 @@ local function ensureAmount(me, filter, total)
 
     local req = nil
     if me.getCraftables then
-        local craftables = me.getCraftables(filter)
+        local craftables = withRetry("getCraftables", function() return me.getCraftables(filter) end)
         if type(craftables) == "table" and craftables[1] and craftables[1].request then
-            req = craftables[1].request(missing)
+            req = withRetry("craft.request", function() return craftables[1].request(missing) end)
         else
-            local all = me.getCraftables()
+            local all = withRetry("getCraftables(all)", function() return me.getCraftables() end)
             if type(all) == "table" then
                 for _, cr in ipairs(all) do
                     if cr and cr.getItemStack then
                         local ok, stack = pcall(cr.getItemStack)
                         if ok and stack and itemMatches(stack, filter) then
-                            req = cr.request(missing)
+                            req = withRetry("craft.request", function() return cr.request(missing) end)
                             break
                         end
                     end
@@ -297,10 +297,10 @@ local function ensureAmount(me, filter, total)
         end
     end
     if not req and me.requestCrafting then
-        req = me.requestCrafting(filter, missing)
+        req = withRetry("requestCrafting", function() return me.requestCrafting(filter, missing) end)
     end
     if not req and me.request then
-        req = me.request(filter, missing)
+        req = withRetry("request", function() return me.request(filter, missing) end)
     end
 
     if not req then
