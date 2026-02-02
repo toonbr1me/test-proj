@@ -251,14 +251,21 @@ local function ensureAmount(me, filter, total)
     if not ans or ans:lower() ~= "y" then return false end
 
     local req = nil
-    if me.requestCrafting then
+    if me.getCraftables then
+        local craftables = me.getCraftables(filter)
+        if type(craftables) == "table" and craftables[1] and craftables[1].request then
+            req = craftables[1].request(missing)
+        end
+    end
+    if not req and me.requestCrafting then
         req = me.requestCrafting(filter, missing)
-    elseif me.request then
+    end
+    if not req and me.request then
         req = me.request(filter, missing)
     end
 
     if not req then
-        print("Крафт недоступен")
+        print("Крафт недоступен (нет крафтable/запроса)")
         return false
     end
 
