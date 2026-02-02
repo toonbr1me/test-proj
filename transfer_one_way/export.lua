@@ -5,6 +5,8 @@ local filesystem = require("filesystem")
 local os = require("os")
 
 local CFG_PATH = "/home/relay_final.cfg"
+local COOLDOWN_RETRIES = 6
+local COOLDOWN_DELAY = 0.6
 
 -- =========================================================
 -- КОНФИГ
@@ -22,6 +24,21 @@ local function loadConfig()
     local d = serialization.unserialize(f:read("*a"))
     f:close()
     return d
+end
+
+local function withRetry(label, fn)
+    for attempt = 1, COOLDOWN_RETRIES do
+        local ok, res = pcall(fn)
+        if ok and res ~= nil then
+            return res
+        end
+        if attempt == 1 then
+            print("Ожидание сети (cooldown)...")
+        end
+        os.sleep(COOLDOWN_DELAY)
+    end
+    print("Ошибка: " .. label .. " (cooldown)")
+    return nil
 end
 
 local function selectComp(title, cType)
@@ -222,14 +239,23 @@ local function sameItem(a, b)
 end
 
 local function itemMatches(it, filter)
-    return it and filter
-       and it.name == filter.name
-       and (it.damage or 0) == (filter.damage or 0)
-       and (it.nbt_hash or "") == (filter.nbt_hash or "")
+    if not (it and filter) then return false end
+    if it.name ~= filter.name then return false end
+    if (it.damage or 0) ~= (filter.damage or 0) then return false end
+
+    local itemHash = it.nbt_hash or it.nbt or it.tag
+    local filterHash = filter.nbt_hash or filter.nbt or filter.tag
+    if filterHash and filterHash ~= "" then
+        if itemHash and itemHash ~= "" then
+            return itemHash == filterHash
+        end
+        return true
+    end
+    return true
 end
 
 local function getAvailableCount(me, filter)
-    local items = me.getItemsInNetwork()
+    local items = withRetry("getItemsInNetwork", function() return me.getItemsInNetwork() end)
     if type(items) ~= "table" then return 0 end
     local total = 0
     for _, it in ipairs(items) do
@@ -310,10 +336,10 @@ local function syncDatabase(me, db, filter)
         db.clear(1)  -- 💥 ВОТ ГЛАВНЫЙ ФИКС
         os.sleep(0.2)
 
-        me.store(filter, db.address, 1)
+        local stored = withRetry("store", function() return me.store(filter, db.address, 1) end)
         os.sleep(0.5)
 
-        local info = db.get(1)
+        local info = withRetry("db.get", function() return db.get(1) end)
         if sameItem(info, filter) then
             print("✔ База настроена")
             return true
@@ -381,7 +407,7 @@ local function transferForward()
     local search = io.read()
     if search == "back" then return end
 
-    local items = meMain.getItemsInNetwork()
+    local items = withRetry("getItemsInNetwork", function() return meMain.getItemsInNetwork() end)
     if type(items) ~= "table" then
         print("Ошибка сети МЭ")
         os.sleep(2)
@@ -448,7 +474,7 @@ local function transferBackward()
     local search = io.read()
     if search == "back" then return end
 
-    local items = meSecondary.getItemsInNetwork()
+    local items = withRetry("getItemsInNetwork", function() return meSecondary.getItemsInNetwork() end)
     if type(items) ~= "table" then
         print("Ошибка сети МЭ")
         os.sleep(2)
