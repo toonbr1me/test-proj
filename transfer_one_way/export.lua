@@ -7,6 +7,7 @@ local os = require("os")
 local CFG_PATH = "/home/relay_final.cfg"
 local COOLDOWN_RETRIES = 6
 local COOLDOWN_DELAY = 0.6
+local LAST_COOLDOWN = false
 
 -- =========================================================
 -- КОНФИГ
@@ -27,6 +28,7 @@ local function loadConfig()
 end
 
 local function withRetry(label, fn)
+    LAST_COOLDOWN = false
     for attempt = 1, COOLDOWN_RETRIES do
         local ok, res = pcall(fn)
         if ok and res ~= nil then
@@ -37,6 +39,7 @@ local function withRetry(label, fn)
         end
         os.sleep(COOLDOWN_DELAY)
     end
+    LAST_COOLDOWN = true
     print("Ошибка: " .. label .. " (cooldown)")
     return nil
 end
@@ -266,8 +269,11 @@ local function getAvailableCount(me, filter)
     return total
 end
 
-local function ensureAmount(me, filter, total)
+local function ensureAmount(me, filter, total, availableHint)
     local available = getAvailableCount(me, filter)
+    if availableHint and availableHint > available then
+        available = availableHint
+    end
     if available >= total then return true end
 
     local missing = total - available
@@ -409,7 +415,11 @@ local function transferForward()
 
     local items = withRetry("getItemsInNetwork", function() return meMain.getItemsInNetwork() end)
     if type(items) ~= "table" then
-        print("Ошибка сети МЭ")
+        if LAST_COOLDOWN then
+            print("Сеть МЭ в cooldown. Повторите попытку.")
+        else
+            print("Ошибка сети МЭ")
+        end
         os.sleep(2)
         return
     end
@@ -442,7 +452,7 @@ local function transferForward()
     local total = tonumber(io.read()) or 0
     if total <= 0 then return end
 
-    if not ensureAmount(meMain, filter, total) then
+    if not ensureAmount(meMain, filter, total, c.size) then
         print("Недостаточно ресурсов. Enter.")
         io.read()
         return
@@ -476,7 +486,11 @@ local function transferBackward()
 
     local items = withRetry("getItemsInNetwork", function() return meSecondary.getItemsInNetwork() end)
     if type(items) ~= "table" then
-        print("Ошибка сети МЭ")
+        if LAST_COOLDOWN then
+            print("Сеть МЭ в cooldown. Повторите попытку.")
+        else
+            print("Ошибка сети МЭ")
+        end
         os.sleep(2)
         return
     end
@@ -509,7 +523,7 @@ local function transferBackward()
     local total = tonumber(io.read()) or 0
     if total <= 0 then return end
 
-    if not ensureAmount(meSecondary, filter, total) then
+    if not ensureAmount(meSecondary, filter, total, c.size) then
         print("Недостаточно ресурсов. Enter.")
         io.read()
         return
