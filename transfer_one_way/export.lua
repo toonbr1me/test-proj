@@ -299,14 +299,22 @@ local function ensureAmount(me, filter, total, availableHint, ctrl)
     local craftComp = me
     if ctrl then
         local ok, c = pcall(component.proxy, ctrl)
-        if ok and c then craftComp = c end
+        if ok and c then 
+            craftComp = c
+            print("Используется контроллер")
+        end
     end
     
     if craftComp.getCraftables then
         local craftables = withRetry("getCraftables", function() return craftComp.getCraftables(filter) end)
-        if type(craftables) == "table" and craftables[1] and craftables[1].request then
-            req = withRetry("craft.request", function() return craftables[1].request(missing) end)
-        else
+        if type(craftables) == "table" then
+            print("Найдено крафтаблов: "..#craftables)
+            if craftables[1] and craftables[1].request then
+                req = withRetry("craft.request", function() return craftables[1].request(missing) end)
+                if req then print("Запрос создан") end
+            end
+        end
+        if not req then
             local all = withRetry("getCraftables(all)", function() return craftComp.getCraftables() end)
             if type(all) == "table" then
                 for _, cr in ipairs(all) do
@@ -314,6 +322,7 @@ local function ensureAmount(me, filter, total, availableHint, ctrl)
                         local ok, stack = pcall(cr.getItemStack)
                         if ok and stack and itemMatches(stack, filter) then
                             req = withRetry("craft.request", function() return cr.request(missing) end)
+                            if req then print("Запрос создан") end
                             break
                         end
                     end
@@ -336,9 +345,18 @@ local function ensureAmount(me, filter, total, availableHint, ctrl)
         if type(cpus) == "table" and #cpus == 0 then
             print("Крафт недоступен (нет крафт-CPU)")
         else
-            print("Крафт недоступен (нет крафтable/запроса)")
+            print("Крафт недоступен (баг AE2+OC)")
         end
-        return false
+        print("Скрафтьте вручную "..missing.." шт.")
+        io.write("Нажмите Enter когда готово...")
+        io.read()
+        available = getAvailableCount(me, filter)
+        if available >= total then
+            return true
+        else
+            print("Всё ещё не хватает")
+            return false
+        end
     end
 
     print("Ожидание крафта...")
@@ -346,6 +364,16 @@ local function ensureAmount(me, filter, total, availableHint, ctrl)
     while waited < 180 do
         os.sleep(1)
         waited = waited + 1
+        
+        if req.isCanceled and req.isCanceled() then
+            print("Крафт отменён системой (баг AE2+OC)")
+            print("Скрафтьте вручную "..missing.." шт.")
+            io.write("Нажмите Enter когда готово...")
+            io.read()
+            available = getAvailableCount(me, filter)
+            return available >= total
+        end
+        
         available = getAvailableCount(me, filter)
         if availableHint and availableHint > available then
             available = availableHint
