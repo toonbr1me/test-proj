@@ -243,7 +243,12 @@ end
 
 local function itemMatches(it, filter)
     if not (it and filter) then return false end
-    if it.name ~= filter.name then return false end
+    if it.name ~= filter.name then
+        if filter.label and it.label and it.label:lower() == filter.label:lower() then
+            return true
+        end
+        return false
+    end
     if (it.damage or 0) ~= (filter.damage or 0) then return false end
 
     local itemHash = it.nbt_hash or it.nbt or it.tag
@@ -316,7 +321,15 @@ local function ensureAmount(me, filter, total, availableHint)
     end
 
     if not req then
-        print("Крафт недоступен (нет крафтable/запроса)")
+        local cpus = nil
+        if me.getCraftingCPUs then
+            cpus = withRetry("getCraftingCPUs", function() return me.getCraftingCPUs() end)
+        end
+        if type(cpus) == "table" and #cpus == 0 then
+            print("Крафт недоступен (нет крафт-CPU)")
+        else
+            print("Крафт недоступен (нет крафтable/запроса)")
+        end
         return false
     end
 
@@ -455,7 +468,7 @@ local function transferForward()
     if not sel or not matches[sel] then return end
 
     local c = matches[sel]
-    local filter = {name=c.name, damage=c.damage, nbt_hash=c.nbt_hash}
+    local filter = {name=c.name, damage=c.damage, nbt_hash=c.nbt_hash, label=c.label}
 
     io.write("Количество: ")
     local total = tonumber(io.read()) or 0
@@ -526,7 +539,7 @@ local function transferBackward()
     if not sel or not matches[sel] then return end
 
     local c = matches[sel]
-    local filter = {name=c.name, damage=c.damage, nbt_hash=c.nbt_hash}
+    local filter = {name=c.name, damage=c.damage, nbt_hash=c.nbt_hash, label=c.label}
 
     io.write("Количество: ")
     local total = tonumber(io.read()) or 0
