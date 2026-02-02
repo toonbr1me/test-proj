@@ -79,6 +79,7 @@ local function configureNetwork(title, current, sharedTp)
     local cfg = current or {}
     cfg.me = selectComp("ME Interface", "me_interface")
     cfg.db = selectComp("Database", "database")
+    cfg.ctrl = selectComp("ME Controller (опционально, для крафта)", "me_controller")
 
     if not cfg.me or not cfg.db then
         print("Ошибка выбора компонентов")
@@ -102,6 +103,7 @@ local function printNetworkSummary(title, cfg)
     print(title .. ":")
     print("  ME: " .. tostring(cfg.me or "-"))
     print("  DB: " .. tostring(cfg.db or "-"))
+    print("  Controller: " .. tostring(cfg.ctrl or "-"))
     print("  ME side: " .. tostring(cfg.me_side or "-"))
 end
 
@@ -294,12 +296,18 @@ local function ensureAmount(me, filter, total, availableHint)
     if not ans or ans:lower() ~= "y" then return false end
 
     local req = nil
-    if me.getCraftables then
-        local craftables = withRetry("getCraftables", function() return me.getCraftables(filter) end)
+    local craftComp = me
+    if component.isAvailable("me_controller") then
+        local ok, ctrl = pcall(component.proxy, component.list("me_controller")())
+        if ok and ctrl then craftComp = ctrl end
+    end
+    
+    if craftComp.getCraftables then
+        local craftables = withRetry("getCraftables", function() return craftComp.getCraftables(filter) end)
         if type(craftables) == "table" and craftables[1] and craftables[1].request then
             req = withRetry("craft.request", function() return craftables[1].request(missing) end)
         else
-            local all = withRetry("getCraftables(all)", function() return me.getCraftables() end)
+            local all = withRetry("getCraftables(all)", function() return craftComp.getCraftables() end)
             if type(all) == "table" then
                 for _, cr in ipairs(all) do
                     if cr and cr.getItemStack then
@@ -313,17 +321,17 @@ local function ensureAmount(me, filter, total, availableHint)
             end
         end
     end
-    if not req and me.requestCrafting then
-        req = withRetry("requestCrafting", function() return me.requestCrafting(filter, missing) end)
+    if not req and craftComp.requestCrafting then
+        req = withRetry("requestCrafting", function() return craftComp.requestCrafting(filter, missing) end)
     end
-    if not req and me.request then
-        req = withRetry("request", function() return me.request(filter, missing) end)
+    if not req and craftComp.request then
+        req = withRetry("request", function() return craftComp.request(filter, missing) end)
     end
 
     if not req then
         local cpus = nil
-        if me.getCraftingCPUs then
-            cpus = withRetry("getCraftingCPUs", function() return me.getCraftingCPUs() end)
+        if craftComp.getCraftingCPUs then
+            cpus = withRetry("getCraftingCPUs", function() return craftComp.getCraftingCPUs() end)
         end
         if type(cpus) == "table" and #cpus == 0 then
             print("Крафт недоступен (нет крафт-CPU)")
