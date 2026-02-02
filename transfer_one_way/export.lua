@@ -247,6 +247,33 @@ local function syncDatabase(me, db, filter)
     return false
 end
 
+local function clearInterfaceSlot(me, db, slot)
+    db.clear(1)
+    os.sleep(0.1)
+    me.setInterfaceConfiguration(slot, db.address, 1, 0)
+end
+
+local function transferExact(tp, fromSide, toSide, total, slot)
+    local moved = 0
+    while moved < total do
+        local want = math.min(64, total - moved)
+        local res = tp.transferItem(fromSide, toSide, want, slot)
+        if res and res > 0 then
+            local applied = res
+            if res > want then
+                local extra = res - want
+                local back = tp.transferItem(toSide, fromSide, extra)
+                applied = res - (back or 0)
+                if applied > want then applied = want end
+            end
+            moved = moved + applied
+            print("Прогресс: "..moved.."/"..total)
+        else
+            os.sleep(0.3)
+        end
+    end
+end
+
 -- =========================================================
 -- ОСНОВНОЙ ЦИКЛ
 -- =========================================================
@@ -318,16 +345,8 @@ local function transferForward()
     print("Открываю интерфейс...")
     meMain.setInterfaceConfiguration(1, dbMain.address, 1, 64)
 
-    local moved = 0
-    while moved < total do
-        local res = tpShared.transferItem(main.me_side, secondary.me_side, math.min(64, total - moved), 1)
-        if res and res > 0 then
-            moved = moved + res
-            print("Прогресс: "..moved.."/"..total)
-        else
-            os.sleep(0.3)
-        end
-    end
+    transferExact(tpShared, main.me_side, secondary.me_side, total, 1)
+    clearInterfaceSlot(meMain, dbMain, 1)
 end
 
 local function transferBackward()
@@ -387,16 +406,8 @@ local function transferBackward()
     print("Открываю интерфейс...")
     meSecondary.setInterfaceConfiguration(1, dbSecondary.address, 1, 64)
 
-    local moved = 0
-    while moved < total do
-        local res = tpShared.transferItem(secondary.me_side, main.me_side, math.min(64, total - moved), 1)
-        if res and res > 0 then
-            moved = moved + res
-            print("Прогресс: "..moved.."/"..total)
-        else
-            os.sleep(0.3)
-        end
-    end
+    transferExact(tpShared, secondary.me_side, main.me_side, total, 1)
+    clearInterfaceSlot(meSecondary, dbSecondary, 1)
 end
 
 while true do
