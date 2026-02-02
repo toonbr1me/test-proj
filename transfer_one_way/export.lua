@@ -282,7 +282,7 @@ local function getAvailableCount(me, filter)
     return total
 end
 
-local function ensureAmount(me, filter, total, availableHint)
+local function ensureAmount(me, filter, total, availableHint, ctrl)
     local available = getAvailableCount(me, filter)
     if availableHint and availableHint > available then
         available = availableHint
@@ -297,9 +297,9 @@ local function ensureAmount(me, filter, total, availableHint)
 
     local req = nil
     local craftComp = me
-    if component.isAvailable("me_controller") then
-        local ok, ctrl = pcall(component.proxy, component.list("me_controller")())
-        if ok and ctrl then craftComp = ctrl end
+    if ctrl then
+        local ok, c = pcall(component.proxy, ctrl)
+        if ok and c then craftComp = c end
     end
     
     if craftComp.getCraftables then
@@ -482,7 +482,7 @@ local function transferForward()
     local total = tonumber(io.read()) or 0
     if total <= 0 then return end
 
-    if not ensureAmount(meMain, filter, total, c.size) then
+    if not ensureAmount(meMain, filter, total, c.size, main.ctrl) then
         print("Недостаточно ресурсов. Enter.")
         io.read()
         return
@@ -553,7 +553,7 @@ local function transferBackward()
     local total = tonumber(io.read()) or 0
     if total <= 0 then return end
 
-    if not ensureAmount(meSecondary, filter, total, c.size) then
+    if not ensureAmount(meSecondary, filter, total, c.size, secondary.ctrl) then
         print("Недостаточно ресурсов. Enter.")
         io.read()
         return
