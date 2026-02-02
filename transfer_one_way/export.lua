@@ -258,13 +258,19 @@ local function itemMatches(it, filter)
 end
 
 local function getAvailableCount(me, filter)
-    local items = withRetry("getItemsInNetwork", function() return me.getItemsInNetwork() end)
-    if type(items) ~= "table" then return 0 end
     local total = 0
-    for _, it in ipairs(items) do
-        if itemMatches(it, filter) then
-            total = total + (it.size or 0)
+    for attempt = 1, COOLDOWN_RETRIES do
+        local items = withRetry("getItemsInNetwork", function() return me.getItemsInNetwork() end)
+        if type(items) == "table" then
+            total = 0
+            for _, it in ipairs(items) do
+                if itemMatches(it, filter) then
+                    total = total + (it.size or 0)
+                end
+            end
+            return total
         end
+        os.sleep(COOLDOWN_DELAY)
     end
     return total
 end
@@ -320,6 +326,9 @@ local function ensureAmount(me, filter, total, availableHint)
         os.sleep(1)
         waited = waited + 1
         available = getAvailableCount(me, filter)
+        if availableHint and availableHint > available then
+            available = availableHint
+        end
         if available >= total then
             print("Крафт завершён: "..available.."/"..total)
             return true
