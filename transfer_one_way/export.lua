@@ -255,6 +255,19 @@ local function ensureAmount(me, filter, total)
         local craftables = me.getCraftables(filter)
         if type(craftables) == "table" and craftables[1] and craftables[1].request then
             req = craftables[1].request(missing)
+        else
+            local all = me.getCraftables()
+            if type(all) == "table" then
+                for _, cr in ipairs(all) do
+                    if cr and cr.getItemStack then
+                        local ok, stack = pcall(cr.getItemStack)
+                        if ok and stack and itemMatches(stack, filter) then
+                            req = cr.request(missing)
+                            break
+                        end
+                    end
+                end
+            end
         end
     end
     if not req and me.requestCrafting then
