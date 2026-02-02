@@ -221,6 +221,66 @@ local function sameItem(a, b)
        and (a.nbt_hash or "") == (b.nbt_hash or "")
 end
 
+local function itemMatches(it, filter)
+    return it and filter
+       and it.name == filter.name
+       and (it.damage or 0) == (filter.damage or 0)
+       and (it.nbt_hash or "") == (filter.nbt_hash or "")
+end
+
+local function getAvailableCount(me, filter)
+    local items = me.getItemsInNetwork()
+    if type(items) ~= "table" then return 0 end
+    local total = 0
+    for _, it in ipairs(items) do
+        if itemMatches(it, filter) then
+            total = total + (it.size or 0)
+        end
+    end
+    return total
+end
+
+local function ensureAmount(me, filter, total)
+    local available = getAvailableCount(me, filter)
+    if available >= total then return true end
+
+    local missing = total - available
+    print("Недостаточно: "..available.."/"..total)
+    io.write("Скрафтить недостающее ("..missing..")? y/n: ")
+    local ans = io.read()
+    if not ans or ans:lower() ~= "y" then return false end
+
+    local req = nil
+    if me.requestCrafting then
+        req = me.requestCrafting(filter, missing)
+    elseif me.request then
+        req = me.request(filter, missing)
+    end
+
+    if not req then
+        print("Крафт недоступен")
+        return false
+    end
+
+    print("Ожидание крафта...")
+    local waited = 0
+    while waited < 180 do
+        os.sleep(1)
+        waited = waited + 1
+        available = getAvailableCount(me, filter)
+        if available >= total then
+            print("Крафт завершён: "..available.."/"..total)
+            return true
+        end
+        if waited % 5 == 0 then
+            print("Готово: "..available.."/"..total)
+        end
+    end
+
+    print("Таймаут ожидания крафта")
+    return false
+end
+
 local function syncDatabase(me, db, filter)
     print("\nСинхронизация базы...")
 
@@ -336,6 +396,12 @@ local function transferForward()
     local total = tonumber(io.read()) or 0
     if total <= 0 then return end
 
+    if not ensureAmount(meMain, filter, total) then
+        print("Недостаточно ресурсов. Enter.")
+        io.read()
+        return
+    end
+
     if not syncDatabase(meMain, dbMain, filter) then
         print("Ошибка базы. Enter.")
         io.read()
@@ -396,6 +462,12 @@ local function transferBackward()
     io.write("Количество: ")
     local total = tonumber(io.read()) or 0
     if total <= 0 then return end
+
+    if not ensureAmount(meSecondary, filter, total) then
+        print("Недостаточно ресурсов. Enter.")
+        io.read()
+        return
+    end
 
     if not syncDatabase(meSecondary, dbSecondary, filter) then
         print("Ошибка базы. Enter.")
